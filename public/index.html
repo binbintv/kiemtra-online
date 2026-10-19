@@ -106,10 +106,19 @@ function showTeacher() {
         </div>
       </div>
 
+      <div class="mb-4 flex items-center gap-3 p-4 bg-purple-50 rounded-xl border border-purple-100">
+        <input id="shuffle" type="checkbox" class="w-5 h-5">
+        <div>
+          <label for="shuffle" class="font-medium text-purple-800">Tráo câu hỏi</label>
+          <p class="text-xs text-purple-600">Mỗi học sinh nhận đề theo thứ tự khác nhau</p>
+        </div>
+      </div>
+
       <div class="mb-4 p-4 bg-green-50 rounded-xl border border-green-100">
         <label class="block text-sm font-medium text-green-800 mb-2">Tải file Word đề (.docx)</label>
-        <input id="wordFile" type="file" accept=".docx,.doc" class="text-sm">
-        <p class="text-xs text-green-700 mt-1">Học sinh sẽ thấy nội dung file Word khi làm bài</p>
+        <input id="wordFile" type="file" accept=".docx,.doc" class="text-sm" onchange="parseWordFile()">
+        <p class="text-xs text-green-700 mt-1">Hệ thống sẽ tự phân tích và điền câu hỏi + đáp án</p>
+        <div id="parseStatus" class="text-xs mt-2"></div>
       </div>
 
       <div id="questionsContainer" class="space-y-4 mb-4"></div>
@@ -176,7 +185,41 @@ function renderQuestions() {
   `).join('');
 }
 
-async function uploadExam() {
+async function parseWordFile() {
+  const file = document.getElementById('wordFile').files[0];
+  const status = document.getElementById('parseStatus');
+  if (!file) return;
+
+  status.textContent = 'Đang phân tích file Word...';
+  status.className = 'text-xs mt-2 text-blue-600';
+
+  const fd = new FormData();
+  fd.append('wordFile', file);
+
+  try {
+    const res = await fetch('/api/parse-word', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.success && data.questions && data.questions.length > 0) {
+      questions = data.questions.map((q, i) => ({
+        id: Date.now() + i,
+        type: q.type,
+        text: q.text || '',
+        options: q.options || ['','','',''],
+        correct: q.correct ?? 0,
+        trueFalse: q.trueFalse !== false
+      }));
+      renderQuestions();
+      status.textContent = `Đã phân tích được ${questions.length} câu hỏi. Kiểm tra lại đáp án trước khi tải lên.`;
+      status.className = 'text-xs mt-2 text-green-700';
+    } else {
+      status.textContent = 'Không tự phân tích được. Vui lòng nhập câu hỏi thủ công bên dưới.';
+      status.className = 'text-xs mt-2 text-orange-600';
+    }
+  } catch (err) {
+    status.textContent = 'Lỗi đọc file. Nhập thủ công.';
+    status.className = 'text-xs mt-2 text-red-600';
+  }
+}
   const title = document.getElementById('examTitle').value.trim();
   const time = document.getElementById('examTime').value;
   const maxAttempts = document.getElementById('maxAttempts').value;
@@ -191,6 +234,7 @@ async function uploadExam() {
   formData.append('time', time);
   formData.append('maxAttempts', maxAttempts);
   formData.append('antiCheat', document.getElementById('antiCheat').checked ? 'true' : 'false');
+  formData.append('shuffle', document.getElementById('shuffle').checked ? 'true' : 'false');
   formData.append('questions', JSON.stringify(questions.map(q => ({
     type: q.type, text: q.text, options: q.options, correct: q.correct, trueFalse: q.trueFalse
   }))));
@@ -362,8 +406,14 @@ async function checkAndStart() {
     return;
   }
 
-  examData.studentName = name;
-  examData.className = className;
+  // Shuffle questions per student if enabled
+  if (examData.shuffle) {
+    const seed = (examData.studentName + examData.className).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    examData.questions = examData.questions.map((q, i) => ({ ...q, _origIdx: i }));
+    examData.questions = shuffleArray(examData.questions, seed);
+  } else {
+    examData.questions = examData.questions.map((q, i) => ({ ...q, _origIdx: i }));
+  }
   showExamStart();
 }
 
@@ -381,7 +431,16 @@ function showExamStart() {
   `;
 }
 
-function startExam() {
+function shuffleArray(arr, seed) {
+  const a = [...arr];
+  let s = seed;
+  for (let i = a.length - 1; i > 0; i--) {
+    s = (s * 9301 + 49297) % 233280;
+    const j = Math.floor((s / 233280) * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
   startTime = Date.now();
   timeLeft = examData.time * 60;
   studentAnswers = {};
@@ -426,7 +485,8 @@ function showDoing() {
 }
 
 function selectAns(idx, val, el) {
-  studentAnswers[idx] = val;
+  const origIdx = examData.questions[idx]._origIdx ?? idx;
+  studentAnswers[origIdx] = val;
   el.parentElement.querySelectorAll('.answer-option').forEach(e => e.classList.remove('selected'));
   el.classList.add('selected');
   const answered = Object.keys(studentAnswers).length;
