@@ -25,10 +25,7 @@ body { font-family: 'Be Vietnam Pro', sans-serif; }
         <p class="text-xs text-blue-100">Link cố định cho học sinh</p>
       </div>
     </div>
-    <div class="flex gap-2" id="navLinks">
-      <a href="/" class="text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">Học sinh</a>
-      <a href="/teacher" class="text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">Giáo viên</a>
-    </div>
+    <div class="flex gap-2" id="navLinks"></div>
   </div>
 </header>
 
@@ -37,8 +34,8 @@ body { font-family: 'Be Vietnam Pro', sans-serif; }
 <script>
 const app = document.getElementById('app');
 const isTeacher = window.location.pathname.includes('/teacher');
+const TEACHER_PASS = 'giaovien123'; // đổi mật khẩu tại đây
 
-// Hide the other role's button
 const nav = document.getElementById('navLinks');
 if (isTeacher) {
   nav.innerHTML = '<span class="text-sm bg-white/30 px-3 py-1.5 rounded-lg">Giáo viên</span>';
@@ -47,9 +44,34 @@ if (isTeacher) {
 }
 
 if (isTeacher) {
-  showTeacher();
+  const saved = sessionStorage.getItem('gv_ok');
+  if (saved === '1') {
+    showTeacher();
+  } else {
+    showTeacherLogin();
+  }
 } else {
   showStudentHome();
+}
+
+function showTeacherLogin() {
+  app.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-sm border p-8 max-w-sm mx-auto text-center">
+      <h2 class="text-xl font-bold mb-4">Đăng nhập giáo viên</h2>
+      <input id="gvPass" type="password" placeholder="Mật khẩu" class="w-full px-4 py-3 border rounded-xl mb-4 outline-none focus:ring-2 focus:ring-blue-500">
+      <button onclick="checkTeacherPass()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold">Vào</button>
+    </div>
+  `;
+}
+
+function checkTeacherPass() {
+  const pass = document.getElementById('gvPass').value;
+  if (pass === TEACHER_PASS) {
+    sessionStorage.setItem('gv_ok', '1');
+    showTeacher();
+  } else {
+    alert('Sai mật khẩu');
+  }
 }
 
 // ========== TEACHER ==========
