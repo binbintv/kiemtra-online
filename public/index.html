@@ -25,7 +25,7 @@ body { font-family: 'Be Vietnam Pro', sans-serif; }
         <p class="text-xs text-blue-100">Link cố định cho học sinh</p>
       </div>
     </div>
-    <div class="flex gap-2">
+    <div class="flex gap-2" id="navLinks">
       <a href="/" class="text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">Học sinh</a>
       <a href="/teacher" class="text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">Giáo viên</a>
     </div>
@@ -37,6 +37,14 @@ body { font-family: 'Be Vietnam Pro', sans-serif; }
 <script>
 const app = document.getElementById('app');
 const isTeacher = window.location.pathname.includes('/teacher');
+
+// Hide the other role's button
+const nav = document.getElementById('navLinks');
+if (isTeacher) {
+  nav.innerHTML = '<span class="text-sm bg-white/30 px-3 py-1.5 rounded-lg">Giáo viên</span>';
+} else {
+  nav.innerHTML = '<span class="text-sm bg-white/30 px-3 py-1.5 rounded-lg">Học sinh</span>';
+}
 
 if (isTeacher) {
   showTeacher();
@@ -151,8 +159,10 @@ async function uploadExam() {
   const time = document.getElementById('examTime').value;
   const maxAttempts = document.getElementById('maxAttempts').value;
   const wordFile = document.getElementById('wordFile').files[0];
+  const btn = document.querySelector('button[onclick="uploadExam()"]');
 
-  if (!title || questions.length === 0) return alert('Nhập tên đề và thêm câu hỏi');
+  if (!title) return alert('Vui lòng nhập tên đề');
+  if (questions.length === 0) return alert('Vui lòng thêm ít nhất 1 câu hỏi');
 
   const formData = new FormData();
   formData.append('title', title);
@@ -164,22 +174,30 @@ async function uploadExam() {
   }))));
   if (wordFile) formData.append('wordFile', wordFile);
 
-  const btn = event.target;
-  btn.disabled = true;
-  btn.textContent = 'Đang tải lên...';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Đang tải lên...';
+  }
 
-  const res = await fetch('/api/upload-exam', { method: 'POST', body: formData });
-  const data = await res.json();
+  try {
+    const res = await fetch('/api/upload-exam', { method: 'POST', body: formData });
+    const data = await res.json();
 
-  btn.disabled = false;
-  btn.textContent = 'Tải đề lên';
+    if (data.success) {
+      alert('Đã tải đề lên thành công!');
+      loadResults();
+      loadHistory();
+    } else {
+      alert(data.error || 'Lỗi từ server');
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Không kết nối được server. Kiểm tra lại mạng hoặc thử lại sau.');
+  }
 
-  if (data.success) {
-    alert('Đã tải đề lên thành công!');
-    loadResults();
-    loadHistory();
-  } else {
-    alert(data.error || 'Lỗi');
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = 'Tải đề lên';
   }
 }
 
