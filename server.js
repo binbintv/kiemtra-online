@@ -42,6 +42,7 @@ app.get('/api/current-exam', (req, res) => {
     time: exam.time,
     maxAttempts: exam.maxAttempts || 1,
     antiCheat: !!exam.antiCheat,
+    shuffle: !!exam.shuffle,
     questions: exam.questions.map(q => ({
       type: q.type,
       text: q.text,
@@ -57,9 +58,89 @@ app.get('/api/teacher/current-exam', (req, res) => {
   res.json(exam);
 });
 
-app.post('/api/upload-exam', upload.single('wordFile'), async (req, res) => {
+app.post('/api/parse-word', upload.single('wordFile'), async (req, res) => {
   try {
-    const { title, time, maxAttempts, antiCheat, questions } = req.body;
+    if (!req.file) return res.status(400).json({ error: 'Chưa chọn file' });
+
+    const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
+    const html = result.value;
+    const text = html.replace(/<[^>]+>/g, '\n').replace(/&nbsp;/g, ' ').replace(/\n+/g, '\n').trim();
+
+    const questions = parseQuestionsFromText(text);
+    res.json({ success: true, questions, wordHtml: html, rawText: text.slice(0, 2000) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Không đọc được file Word' });
+  }
+});
+
+function parseQuestionsFromText(text) {
+  const questions = [];
+  // Split by common question patterns: Câu 1, Câu 2, Question 1, 1., 1)
+  const blocks = text.split(/(?=Câu\s*\d+|Question\s*\d+|^\d+[\.\)]\s)/im).filter(b => b.trim());
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) continue;
+
+    let qText = '';
+    const options = [];
+    let correct = -1;
+    let isTF = false;
+    let trueFalse = true;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Option patterns: A. B. C. D. or A) B) or 1. 2. 3. 4.
+      const optMatch = line.match(/^([A-D]|[a-d])[\.\)]\s*(.+)/);
+      if (optMatch) {
+        options.push(optMatch[2].trim());
+        continue;
+      }
+      // Answer patterns
+      const ansMatch = line.match(/(?:Đáp án|Answer|Đáp án đúng|Chọn|Key)\s*[:\-]?\s*([A-Da-d])/i);
+      if (ansMatch) {
+        correct = ansMatch[1].toUpperCase().charCodeAt(0) - 65;
+        continue;
+      }
+      // True/False
+      if (/đúng\s*\/\s*sai|true\s*\/\s*false|đúng hay sai/i.test(line)) {
+        isTF = true;
+      }
+      const tfAns = line.match(/(?:Đáp án|Answer)\s*[:\-]?\s*(Đúng|Sai|True|False)/i);
+      if (tfAns) {
+        isTF = true;
+        trueFalse = /đúng|true/i.test(tfAns[1]);
+        continue;
+      }
+      // Question text (skip the "Câu X:" prefix)
+      if (!qText && !optMatch) {
+        qText = line.replace(/^(Câu|Question)\s*\d+[\.\:\)]\s*/i, '').trim();
+      } else if (options.length === 0 && !isTF) {
+        qText += ' ' + line;
+      }
+    }
+
+    if (isTF && qText) {
+      questions.push({
+        type: 'tf',
+        text: qText,
+        trueFalse,
+        options: []
+      });
+    } else if (options.length >= 2 && qText) {
+      questions.push({
+        type: 'mcq',
+        text: qText,
+        options: options.slice(0, 4),
+        correct: correct >= 0 && correct < options.length ? correct : 0
+      });
+    }
+  }
+  return questions;
+}
+  try {
+    const { title, time, maxAttempts, antiCheat, shuffle, questions } = req.body;
     const parsedQuestions = typeof questions === 'string' ? JSON.parse(questions) : questions;
 
     if (!title || !parsedQuestions || parsedQuestions.length === 0) {
@@ -78,6 +159,7 @@ app.post('/api/upload-exam', upload.single('wordFile'), async (req, res) => {
       time: parseInt(time) || 15,
       maxAttempts: parseInt(maxAttempts) || 1,
       antiCheat: antiCheat === 'true' || antiCheat === true,
+      shuffle: shuffle === 'true' || shuffle === true,
       questions: parsedQuestions,
       wordHtml,
       updatedAt: new Date().toISOString()
