@@ -6,13 +6,12 @@
 <meta name="theme-color" content="#1e40af">
 <title>Kiểm Tra Online</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 body { font-family: 'Be Vietnam Pro', sans-serif; }
 .answer-option.selected { border-color: #3b82f6; background: #eff6ff; }
-.pdf-container { max-height: 60vh; overflow: auto; }
-canvas { max-width: 100%; height: auto; margin: 0 auto; }
+.word-content { background: white; padding: 1rem; border-radius: 12px; max-height: 45vh; overflow: auto; font-size: 0.95rem; }
+.word-content img { max-width: 100%; }
 </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -23,80 +22,91 @@ canvas { max-width: 100%; height: auto; margin: 0 auto; }
       <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">📝</div>
       <div>
         <h1 class="font-bold text-lg">Kiểm Tra Online</h1>
-        <p class="text-xs text-blue-100">Giáo viên tạo đề · Học sinh làm bài</p>
+        <p class="text-xs text-blue-100">Link cố định cho học sinh</p>
       </div>
     </div>
-    <a href="/" class="text-sm bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg">Trang chủ</a>
+    <div class="flex gap-2">
+      <a href="/" class="text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">Học sinh</a>
+      <a href="/teacher" class="text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">Giáo viên</a>
+    </div>
   </div>
 </header>
 
 <main class="max-w-5xl mx-auto px-4 py-6" id="app"></main>
 
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
 const app = document.getElementById('app');
-let questions = [];
-let uploadedPdf = null;
-let examData = null;
-let studentAnswers = {};
-let timerInterval = null;
-let timeLeft = 0;
-let startTime = null;
+const isTeacher = window.location.pathname.includes('/teacher');
 
-// Routing
-const path = window.location.pathname;
-const examMatch = path.match(/\/exam\/([a-z0-9]+)/);
-
-if (examMatch) {
-  loadStudentExam(examMatch[1]);
-} else if (path === '/teacher' || path === '/teacher/') {
-  showTeacherDashboard();
+if (isTeacher) {
+  showTeacher();
 } else {
-  showTeacherCreate();
+  showStudentHome();
 }
 
-function showTeacherCreate() {
+// ========== TEACHER ==========
+let questions = [];
+
+function showTeacher() {
   app.innerHTML = `
     <div class="bg-white rounded-2xl shadow-sm border p-6 mb-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">Tạo đề kiểm tra mới</h2>
-        <a href="/teacher" class="text-blue-600 text-sm font-medium hover:underline">Xem kết quả →</a>
-      </div>
-      <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <h2 class="text-xl font-bold mb-1">Tải đề mới lên</h2>
+      <p class="text-sm text-gray-500 mb-5">Học sinh mở link cố định: <strong class="text-blue-600">${window.location.origin}</strong></p>
+
+      <div class="grid md:grid-cols-3 gap-4 mb-4">
         <div>
           <label class="block text-sm font-medium mb-1">Tên đề</label>
-          <input id="examTitle" type="text" placeholder="VD: Kiểm tra 15 phút Toán 11" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+          <input id="examTitle" type="text" placeholder="VD: Kiểm tra 15 phút" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Thời gian (phút)</label>
           <input id="examTime" type="number" value="15" min="1" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
         </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Số lần làm tối đa</label>
+          <input id="maxAttempts" type="number" value="1" min="1" max="10" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
       </div>
-      <div class="mb-4 p-4 bg-blue-50 rounded-xl">
-        <label class="block text-sm font-medium text-blue-800 mb-2">Tải file PDF đề (tùy chọn)</label>
-        <input id="pdfUpload" type="file" accept=".pdf" class="text-sm">
-        <p class="text-xs text-blue-600 mt-1">Khuyến nghị file nhỏ hơn 3MB</p>
+
+      <div class="mb-4 flex items-center gap-3 p-4 bg-orange-50 rounded-xl border border-orange-100">
+        <input id="antiCheat" type="checkbox" class="w-5 h-5">
+        <div>
+          <label for="antiCheat" class="font-medium text-orange-800">Bật chế độ chống gian lận</label>
+          <p class="text-xs text-orange-600">Tự động fullscreen + đếm số lần thoát trang</p>
+        </div>
       </div>
+
+      <div class="mb-4 p-4 bg-green-50 rounded-xl border border-green-100">
+        <label class="block text-sm font-medium text-green-800 mb-2">Tải file Word đề (.docx)</label>
+        <input id="wordFile" type="file" accept=".docx,.doc" class="text-sm">
+        <p class="text-xs text-green-700 mt-1">Học sinh sẽ thấy nội dung file Word khi làm bài</p>
+      </div>
+
       <div id="questionsContainer" class="space-y-4 mb-4"></div>
       <button onclick="addQuestion()" class="w-full py-3 border-2 border-dashed rounded-xl text-gray-600 hover:border-blue-400 hover:text-blue-600 font-medium">+ Thêm câu hỏi</button>
-      <button onclick="createExam()" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 rounded-xl">Tạo đề & Lấy link</button>
+
+      <button onclick="uploadExam()" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 rounded-xl">
+        Tải đề lên
+      </button>
     </div>
-    <div id="linkResult" class="hidden bg-green-50 border border-green-200 rounded-2xl p-6">
-      <h3 class="font-bold text-green-800 mb-3">Link cho học sinh</h3>
-      <input id="shareLink" readonly class="w-full text-sm font-mono bg-white px-3 py-2 rounded-lg border mb-3" onclick="this.select()">
-      <button onclick="copyLink()" class="bg-green-600 text-white px-6 py-2 rounded-lg">Sao chép link</button>
+
+    <div class="bg-white rounded-2xl shadow-sm border p-6 mb-6">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold">Kết quả hiện tại</h3>
+        <button onclick="loadResults()" class="text-sm text-blue-600 hover:underline">Làm mới</button>
+      </div>
+      <div id="resultsTable" class="text-sm text-gray-500">Đang tải...</div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border p-6">
+      <h3 class="text-lg font-bold mb-4">Lịch sử đề đã tải</h3>
+      <div id="historyList" class="text-sm text-gray-500">Đang tải...</div>
     </div>
   `;
+  questions = [];
   addQuestion();
-  document.getElementById('pdfUpload').onchange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) { alert('File quá lớn'); return; }
-    const reader = new FileReader();
-    reader.onload = () => { uploadedPdf = reader.result; };
-    reader.readAsDataURL(file);
-  };
+  loadResults();
+  loadHistory();
 }
 
 function addQuestion() {
@@ -136,88 +146,214 @@ function renderQuestions() {
   `).join('');
 }
 
-async function createExam() {
+async function uploadExam() {
   const title = document.getElementById('examTitle').value.trim();
-  const time = parseInt(document.getElementById('examTime').value) || 15;
+  const time = document.getElementById('examTime').value;
+  const maxAttempts = document.getElementById('maxAttempts').value;
+  const wordFile = document.getElementById('wordFile').files[0];
+
   if (!title || questions.length === 0) return alert('Nhập tên đề và thêm câu hỏi');
-  const payload = {
-    title, time,
-    questions: questions.map(q => ({ type: q.type, text: q.text, options: q.options, correct: q.correct, trueFalse: q.trueFalse })),
-    pdf: uploadedPdf
-  };
-  const res = await fetch('/api/exams', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+
+  const formData = new FormData();
+  formData.append('title', title);
+  formData.append('time', time);
+  formData.append('maxAttempts', maxAttempts);
+  formData.append('antiCheat', document.getElementById('antiCheat').checked ? 'true' : 'false');
+  formData.append('questions', JSON.stringify(questions.map(q => ({
+    type: q.type, text: q.text, options: q.options, correct: q.correct, trueFalse: q.trueFalse
+  }))));
+  if (wordFile) formData.append('wordFile', wordFile);
+
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Đang tải lên...';
+
+  const res = await fetch('/api/upload-exam', { method: 'POST', body: formData });
   const data = await res.json();
-  if (data.id) {
-    const link = window.location.origin + '/exam/' + data.id;
-    document.getElementById('shareLink').value = link;
-    document.getElementById('linkResult').classList.remove('hidden');
+
+  btn.disabled = false;
+  btn.textContent = 'Tải đề lên';
+
+  if (data.success) {
+    alert('Đã tải đề lên thành công!');
+    loadResults();
+    loadHistory();
+  } else {
+    alert(data.error || 'Lỗi');
   }
 }
 
-function copyLink() {
-  const el = document.getElementById('shareLink');
-  el.select();
-  navigator.clipboard.writeText(el.value);
-  alert('Đã sao chép!');
+async function loadResults() {
+  const res = await fetch('/api/results');
+  const results = await res.json();
+  const el = document.getElementById('resultsTable');
+  if (!results.length) {
+    el.innerHTML = '<p class="text-gray-400">Chưa có học sinh nào nộp bài</p>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-3 py-2 text-left">Họ tên</th>
+            <th class="px-3 py-2 text-left">Lớp</th>
+            <th class="px-3 py-2 text-center">Điểm</th>
+            <th class="px-3 py-2 text-center">Thời gian</th>
+            <th class="px-3 py-2 text-center">Lần</th>
+            <th class="px-3 py-2 text-center">Thoát trang</th>
+            <th class="px-3 py-2 text-left">Thời điểm</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${results.map(r => `
+            <tr class="border-t">
+              <td class="px-3 py-2 font-medium">${r.studentName}</td>
+              <td class="px-3 py-2">${r.className || '-'}</td>
+              <td class="px-3 py-2 text-center font-bold">${r.score}/${r.total}</td>
+              <td class="px-3 py-2 text-center">${Math.floor(r.timeTaken/60)}:${(r.timeTaken%60).toString().padStart(2,'0')}</td>
+              <td class="px-3 py-2 text-center">${r.attempt}/${r.maxAttempts || 1}</td>
+              <td class="px-3 py-2 text-center ${r.exitCount > 0 ? 'text-red-600 font-bold' : ''}">${r.exitCount || 0}</td>
+              <td class="px-3 py-2 text-gray-500">${new Date(r.submittedAt).toLocaleString('vi-VN')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
-async function loadStudentExam(id) {
-  app.innerHTML = `<div class="text-center py-20 text-gray-500">Đang tải đề...</div>`;
-  const res = await fetch('/api/exams/' + id);
-  if (!res.ok) { app.innerHTML = `<div class="text-center py-20">Không tìm thấy đề</div>`; return; }
+async function loadHistory() {
+  const res = await fetch('/api/exam-history');
+  const history = await res.json();
+  const el = document.getElementById('historyList');
+  if (!history.length) {
+    el.innerHTML = '<p class="text-gray-400">Chưa có đề nào được lưu trữ</p>';
+    return;
+  }
+  el.innerHTML = history.slice(0, 10).map(h => `
+    <div class="border-b py-2">
+      <span class="font-medium">${h.title}</span>
+      <span class="text-gray-400 text-xs ml-2">${new Date(h.archivedAt || h.updatedAt).toLocaleString('vi-VN')}</span>
+    </div>
+  `).join('');
+}
+
+// ========== STUDENT ==========
+let examData = null;
+let studentAnswers = {};
+let timerInterval = null;
+let timeLeft = 0;
+let startTime = null;
+let exitCount = 0;
+let antiCheatActive = false;
+
+function getSavedStudent() {
+  try {
+    return JSON.parse(localStorage.getItem('kt_student') || 'null');
+  } catch { return null; }
+}
+function saveStudent(name, className) {
+  localStorage.setItem('kt_student', JSON.stringify({ name, className }));
+}
+
+async function showStudentHome() {
+  const saved = getSavedStudent();
+  app.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-sm border p-6 mb-6 max-w-lg mx-auto">
+      <h2 class="text-xl font-bold mb-4 text-center">Nhập thông tin</h2>
+      <div class="space-y-3">
+        <input id="stuName" type="text" placeholder="Họ và tên" value="${saved?.name || ''}" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+        <input id="stuClass" type="text" placeholder="Lớp (VD: 11T1)" value="${saved?.className || ''}" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+        <button onclick="checkAndStart()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 rounded-xl">Tiếp tục</button>
+      </div>
+    </div>
+    <div id="myResultsBox" class="max-w-lg mx-auto"></div>
+  `;
+  if (saved) loadMyResults(saved.name, saved.className);
+}
+
+async function loadMyResults(name, className) {
+  const res = await fetch(`/api/my-results?name=${encodeURIComponent(name)}&className=${encodeURIComponent(className)}`);
+  const mine = await res.json();
+  const box = document.getElementById('myResultsBox');
+  if (!mine.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-sm border p-5">
+      <h3 class="font-bold mb-3">Bài bạn đã làm</h3>
+      <div class="space-y-2 text-sm">
+        ${mine.map(r => `
+          <div class="flex justify-between items-center border-b pb-2">
+            <div>
+              <span class="font-medium">${r.examTitle || 'Đề kiểm tra'}</span>
+              <span class="text-gray-400 text-xs ml-2">Lần ${r.attempt}</span>
+            </div>
+            <span class="font-bold text-blue-600">${r.score}/${r.total}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+async function checkAndStart() {
+  const name = document.getElementById('stuName').value.trim();
+  const className = document.getElementById('stuClass').value.trim();
+  if (!name || !className) return alert('Vui lòng nhập họ tên và lớp');
+  saveStudent(name, className);
+
+  const res = await fetch('/api/current-exam');
   examData = await res.json();
-  examData.id = id;
-  showStudentStart();
+  if (!examData) {
+    alert('Giáo viên chưa tải đề lên');
+    return;
+  }
+
+  // Check attempts
+  const myRes = await fetch(`/api/my-results?name=${encodeURIComponent(name)}&className=${encodeURIComponent(className)}`);
+  const mine = await myRes.json();
+  const used = mine.length;
+  if (used >= examData.maxAttempts) {
+    alert(`Bạn đã làm đủ ${examData.maxAttempts} lần cho đề này`);
+    loadMyResults(name, className);
+    return;
+  }
+
+  examData.studentName = name;
+  examData.className = className;
+  showExamStart();
 }
 
-function showStudentStart() {
+function showExamStart() {
   app.innerHTML = `
     <div class="bg-white rounded-2xl shadow-sm border p-8 text-center max-w-lg mx-auto">
       <div class="text-5xl mb-4">📋</div>
       <h2 class="text-2xl font-bold mb-2">${examData.title}</h2>
-      <p class="text-gray-500 mb-6">${examData.questions.length} câu · ${examData.time} phút</p>
-      <div class="mb-6">
-        <label class="block text-sm font-medium mb-2">Họ và tên học sinh</label>
-        <input id="studentName" type="text" placeholder="Nhập họ tên" class="w-full px-4 py-3 border rounded-xl text-center text-lg outline-none focus:ring-2 focus:ring-blue-500">
-      </div>
-      <div id="pdfContainer" class="mb-6"></div>
+      <p class="text-gray-500 mb-2">${examData.questions.length} câu · ${examData.time} phút</p>
+      <p class="text-sm text-blue-600 mb-6">Số lần làm: tối đa ${examData.maxAttempts} lần</p>
+      ${examData.wordHtml ? `<div class="word-content text-left mb-6">${examData.wordHtml}</div>` : ''}
       <button onclick="startExam()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-10 rounded-xl text-lg">Bắt đầu làm bài</button>
+      <button onclick="showStudentHome()" class="mt-3 text-sm text-gray-500 hover:underline">← Quay về trang chủ</button>
     </div>
   `;
-  if (examData.pdf) renderPDF(examData.pdf, 'pdfContainer');
-}
-
-async function renderPDF(dataUrl, containerId) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = '<div class="pdf-container bg-gray-100 p-2 rounded-xl" id="pdfCanvas"></div>';
-  try {
-    const pdf = await pdfjsLib.getDocument(dataUrl).promise;
-    const canvasBox = document.getElementById('pdfCanvas');
-    for (let i = 1; i <= Math.min(pdf.numPages, 4); i++) {
-      const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 1.1 });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.className = 'mb-2';
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      canvasBox.appendChild(canvas);
-    }
-  } catch (e) { container.innerHTML = ''; }
 }
 
 function startExam() {
-  const name = document.getElementById('studentName').value.trim();
-  if (!name) return alert('Vui lòng nhập họ tên');
-  examData.studentName = name;
   startTime = Date.now();
   timeLeft = examData.time * 60;
   studentAnswers = {};
-  showDoingExam();
+  exitCount = 0;
+  showDoing();
   startTimer();
+  if (examData.antiCheat) {
+    enableAntiCheat();
+  }
 }
 
-function showDoingExam() {
+function showDoing() {
   app.innerHTML = `
     <div class="bg-white rounded-xl border p-4 mb-4 sticky top-20 z-40">
       <div class="flex justify-between items-center">
@@ -225,7 +361,9 @@ function showDoingExam() {
         <span class="text-sm text-gray-500" id="progress">0/${examData.questions.length}</span>
       </div>
       <div class="w-full bg-gray-200 rounded-full h-1.5 mt-2"><div id="bar" class="bg-blue-600 h-1.5 rounded-full" style="width:0%"></div></div>
+      ${examData.antiCheat ? '<div id="exitWarn" class="text-xs text-orange-600 mt-1">Chế độ chống gian lận đang bật</div>' : ''}
     </div>
+    ${examData.wordHtml ? `<div class="word-content mb-4">${examData.wordHtml}</div>` : ''}
     <div id="qContainer" class="space-y-4 mb-6"></div>
     <button onclick="submitExam()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-lg">Nộp bài</button>
   `;
@@ -256,7 +394,54 @@ function selectAns(idx, val, el) {
   document.getElementById('bar').style.width = (answered / examData.questions.length * 100) + '%';
 }
 
-function startTimer() {
+function enableAntiCheat() {
+  antiCheatActive = true;
+  // Request fullscreen (works like F11 on desktop)
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('blur', onWindowBlur);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+}
+
+function onVisibilityChange() {
+  if (document.hidden && antiCheatActive) {
+    exitCount++;
+    showExitWarning();
+  }
+}
+function onWindowBlur() {
+  if (antiCheatActive) {
+    exitCount++;
+    showExitWarning();
+  }
+}
+function onFullscreenChange() {
+  if (!document.fullscreenElement && antiCheatActive) {
+    exitCount++;
+    showExitWarning();
+    // Try to re-enter fullscreen
+    setTimeout(() => {
+      if (antiCheatActive && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      }
+    }, 500);
+  }
+}
+function showExitWarning() {
+  const warn = document.getElementById('exitWarn');
+  if (warn) warn.textContent = `⚠️ Đã thoát trang ${exitCount} lần`;
+}
+
+function disableAntiCheat() {
+  antiCheatActive = false;
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('blur', onWindowBlur);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
+  if (document.fullscreenElement) document.exitFullscreen?.();
+}
   const update = () => {
     const m = Math.floor(timeLeft / 60).toString().padStart(2,'0');
     const s = (timeLeft % 60).toString().padStart(2,'0');
@@ -270,92 +455,34 @@ function startTimer() {
 
 async function submitExam() {
   clearInterval(timerInterval);
+  disableAntiCheat();
   const timeTaken = Math.round((Date.now() - startTime) / 1000);
   const res = await fetch('/api/submit', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
-      examId: examData.id,
       studentName: examData.studentName,
+      className: examData.className,
       answers: studentAnswers,
-      timeTaken
+      timeTaken,
+      exitCount
     })
   });
   const data = await res.json();
+  if (!data.success) {
+    alert(data.error || 'Lỗi nộp bài');
+    showStudentHome();
+    return;
+  }
   app.innerHTML = `
     <div class="bg-white rounded-2xl shadow-sm border p-8 text-center max-w-lg mx-auto">
       <div class="text-6xl mb-4">${data.score / data.total >= 0.8 ? '🎉' : data.score / data.total >= 0.5 ? '👍' : '💪'}</div>
       <h2 class="text-2xl font-bold mb-2">Kết quả</h2>
       <p class="text-4xl font-bold text-blue-600 mb-2">${data.score}/${data.total}</p>
-      <p class="text-gray-500">Lần làm thứ ${data.attempt}</p>
-      <p class="text-sm text-gray-400 mt-4">Điểm đã được gửi cho giáo viên</p>
+      <p class="text-gray-500">Lần làm thứ ${data.attempt} / ${data.maxAttempts}</p>
+      <button onclick="showStudentHome()" class="mt-6 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-3 px-8 rounded-xl">Quay về trang chủ</button>
     </div>
   `;
-}
-
-async function showTeacherDashboard() {
-  app.innerHTML = `<div class="text-center py-10">Đang tải...</div>`;
-  const examsRes = await fetch('/api/exams');
-  const exams = await examsRes.json();
-  app.innerHTML = `
-    <div class="mb-6 flex justify-between items-center">
-      <h2 class="text-xl font-bold">Danh sách đề</h2>
-      <a href="/" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">+ Tạo đề mới</a>
-    </div>
-    <div id="examList" class="space-y-3"></div>
-    <div id="resultsPanel" class="mt-8 hidden"></div>
-  `;
-  const list = document.getElementById('examList');
-  if (exams.length === 0) {
-    list.innerHTML = '<p class="text-gray-500 text-center py-10">Chưa có đề nào</p>';
-    return;
-  }
-  list.innerHTML = exams.map(e => `
-    <div class="bg-white rounded-xl border p-4 flex justify-between items-center cursor-pointer hover:shadow" onclick="viewResults('${e.id}', '${e.title.replace(/'/g, "\\'")}')">
-      <div>
-        <p class="font-semibold">${e.title}</p>
-        <p class="text-sm text-gray-500">${e.questionCount} câu · ${e.time} phút</p>
-      </div>
-      <span class="text-blue-600 text-sm">Xem kết quả →</span>
-    </div>
-  `).join('');
-}
-
-async function viewResults(examId, title) {
-  const res = await fetch('/api/results/' + examId);
-  const results = await res.json();
-  const panel = document.getElementById('resultsPanel');
-  panel.classList.remove('hidden');
-  panel.innerHTML = `
-    <h3 class="text-lg font-bold mb-4">Kết quả: ${title}</h3>
-    ${results.length === 0 ? '<p class="text-gray-500">Chưa có học sinh nào nộp bài</p>' : `
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm bg-white rounded-xl overflow-hidden border">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-4 py-3 text-left">Họ tên</th>
-              <th class="px-4 py-3 text-center">Điểm</th>
-              <th class="px-4 py-3 text-center">Thời gian</th>
-              <th class="px-4 py-3 text-center">Lần làm</th>
-              <th class="px-4 py-3 text-left">Thời điểm</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${results.map(r => `
-              <tr class="border-t">
-                <td class="px-4 py-3 font-medium">${r.studentName}</td>
-                <td class="px-4 py-3 text-center font-bold ${r.percentage >= 80 ? 'text-green-600' : r.percentage >= 50 ? 'text-blue-600' : 'text-orange-600'}">${r.score}/${r.total}</td>
-                <td class="px-4 py-3 text-center">${Math.floor(r.timeTaken/60)}:${(r.timeTaken%60).toString().padStart(2,'0')}</td>
-                <td class="px-4 py-3 text-center">${r.attempt}</td>
-                <td class="px-4 py-3 text-gray-500">${new Date(r.submittedAt).toLocaleString('vi-VN')}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    `}
-  `;
-  panel.scrollIntoView({ behavior: 'smooth' });
 }
 </script>
 </body>
