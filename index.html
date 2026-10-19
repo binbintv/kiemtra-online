@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1e40af">
+<title>Kiểm Tra Online</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body { font-family: 'Be Vietnam Pro', sans-serif; }
+.answer-option.selected { border-color: #3b82f6; background: #eff6ff; }
+.pdf-container { max-height: 60vh; overflow: auto; }
+canvas { max-width: 100%; height: auto; margin: 0 auto; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-gradient-to-r from-blue-700 to-indigo-700 text-white shadow-lg sticky top-0 z-50">
+  <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">📝</div>
+      <div>
+        <h1 class="font-bold text-lg">Kiểm Tra Online</h1>
+        <p class="text-xs text-blue-100">Giáo viên tạo đề · Học sinh làm bài</p>
+      </div>
+    </div>
+    <a href="/" class="text-sm bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg">Trang chủ</a>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 py-6" id="app"></main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const app = document.getElementById('app');
+let questions = [];
+let uploadedPdf = null;
+let examData = null;
+let studentAnswers = {};
+let timerInterval = null;
+let timeLeft = 0;
+let startTime = null;
+
+// Routing
+const path = window.location.pathname;
+const examMatch = path.match(/\/exam\/([a-z0-9]+)/);
+
+if (examMatch) {
+  loadStudentExam(examMatch[1]);
+} else if (path === '/teacher' || path === '/teacher/') {
+  showTeacherDashboard();
+} else {
+  showTeacherCreate();
+}
+
+function showTeacherCreate() {
+  app.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-sm border p-6 mb-6">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold">Tạo đề kiểm tra mới</h2>
+        <a href="/teacher" class="text-blue-600 text-sm font-medium hover:underline">Xem kết quả →</a>
+      </div>
+      <div class="grid md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Tên đề</label>
+          <input id="examTitle" type="text" placeholder="VD: Kiểm tra 15 phút Toán 11" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Thời gian (phút)</label>
+          <input id="examTime" type="number" value="15" min="1" class="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div class="mb-4 p-4 bg-blue-50 rounded-xl">
+        <label class="block text-sm font-medium text-blue-800 mb-2">Tải file PDF đề (tùy chọn)</label>
+        <input id="pdfUpload" type="file" accept=".pdf" class="text-sm">
+        <p class="text-xs text-blue-600 mt-1">Khuyến nghị file nhỏ hơn 3MB</p>
+      </div>
+      <div id="questionsContainer" class="space-y-4 mb-4"></div>
+      <button onclick="addQuestion()" class="w-full py-3 border-2 border-dashed rounded-xl text-gray-600 hover:border-blue-400 hover:text-blue-600 font-medium">+ Thêm câu hỏi</button>
+      <button onclick="createExam()" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 rounded-xl">Tạo đề & Lấy link</button>
+    </div>
+    <div id="linkResult" class="hidden bg-green-50 border border-green-200 rounded-2xl p-6">
+      <h3 class="font-bold text-green-800 mb-3">Link cho học sinh</h3>
+      <input id="shareLink" readonly class="w-full text-sm font-mono bg-white px-3 py-2 rounded-lg border mb-3" onclick="this.select()">
+      <button onclick="copyLink()" class="bg-green-600 text-white px-6 py-2 rounded-lg">Sao chép link</button>
+    </div>
+  `;
+  addQuestion();
+  document.getElementById('pdfUpload').onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { alert('File quá lớn'); return; }
+    const reader = new FileReader();
+    reader.onload = () => { uploadedPdf = reader.result; };
+    reader.readAsDataURL(file);
+  };
+}
+
+function addQuestion() {
+  questions.push({ id: Date.now(), type: 'mcq', text: '', options: ['','','',''], correct: 0, trueFalse: true });
+  renderQuestions();
+}
+
+function renderQuestions() {
+  const c = document.getElementById('questionsContainer');
+  if (!c) return;
+  c.innerHTML = questions.map((q, i) => `
+    <div class="bg-gray-50 rounded-xl p-4 border">
+      <div class="flex justify-between mb-2">
+        <span class="font-semibold">Câu ${i+1}</span>
+        <div class="flex gap-2">
+          <select onchange="questions.find(x=>x.id===${q.id}).type=this.value; renderQuestions()" class="text-sm border rounded px-2 py-1">
+            <option value="mcq" ${q.type==='mcq'?'selected':''}>ABCD</option>
+            <option value="tf" ${q.type==='tf'?'selected':''}>Đúng/Sai</option>
+          </select>
+          <button onclick="questions=questions.filter(x=>x.id!==${q.id}); renderQuestions()" class="text-red-500 text-sm">Xóa</button>
+        </div>
+      </div>
+      <textarea onchange="questions.find(x=>x.id===${q.id}).text=this.value" class="w-full border rounded p-2 text-sm mb-2" rows="2" placeholder="Nội dung câu hỏi">${q.text}</textarea>
+      ${q.type === 'mcq' ? q.options.map((o, oi) => `
+        <div class="flex items-center gap-2 mb-1">
+          <input type="radio" name="c${q.id}" ${q.correct===oi?'checked':''} onchange="questions.find(x=>x.id===${q.id}).correct=${oi}">
+          <span class="w-5 font-medium">${String.fromCharCode(65+oi)}</span>
+          <input value="${o}" onchange="questions.find(x=>x.id===${q.id}).options[${oi}]=this.value" class="flex-1 border rounded px-2 py-1 text-sm" placeholder="Đáp án">
+        </div>
+      `).join('') : `
+        <div class="flex gap-4">
+          <label><input type="radio" name="tf${q.id}" ${q.trueFalse?'checked':''} onchange="questions.find(x=>x.id===${q.id}).trueFalse=true"> Đúng</label>
+          <label><input type="radio" name="tf${q.id}" ${!q.trueFalse?'checked':''} onchange="questions.find(x=>x.id===${q.id}).trueFalse=false"> Sai</label>
+        </div>
+      `}
+    </div>
+  `).join('');
+}
+
+async function createExam() {
+  const title = document.getElementById('examTitle').value.trim();
+  const time = parseInt(document.getElementById('examTime').value) || 15;
+  if (!title || questions.length === 0) return alert('Nhập tên đề và thêm câu hỏi');
+  const payload = {
+    title, time,
+    questions: questions.map(q => ({ type: q.type, text: q.text, options: q.options, correct: q.correct, trueFalse: q.trueFalse })),
+    pdf: uploadedPdf
+  };
+  const res = await fetch('/api/exams', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (data.id) {
+    const link = window.location.origin + '/exam/' + data.id;
+    document.getElementById('shareLink').value = link;
+    document.getElementById('linkResult').classList.remove('hidden');
+  }
+}
+
+function copyLink() {
+  const el = document.getElementById('shareLink');
+  el.select();
+  navigator.clipboard.writeText(el.value);
+  alert('Đã sao chép!');
+}
+
+async function loadStudentExam(id) {
+  app.innerHTML = `<div class="text-center py-20 text-gray-500">Đang tải đề...</div>`;
+  const res = await fetch('/api/exams/' + id);
+  if (!res.ok) { app.innerHTML = `<div class="text-center py-20">Không tìm thấy đề</div>`; return; }
+  examData = await res.json();
+  examData.id = id;
+  showStudentStart();
+}
+
+function showStudentStart() {
+  app.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-sm border p-8 text-center max-w-lg mx-auto">
+      <div class="text-5xl mb-4">📋</div>
+      <h2 class="text-2xl font-bold mb-2">${examData.title}</h2>
+      <p class="text-gray-500 mb-6">${examData.questions.length} câu · ${examData.time} phút</p>
+      <div class="mb-6">
+        <label class="block text-sm font-medium mb-2">Họ và tên học sinh</label>
+        <input id="studentName" type="text" placeholder="Nhập họ tên" class="w-full px-4 py-3 border rounded-xl text-center text-lg outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div id="pdfContainer" class="mb-6"></div>
+      <button onclick="startExam()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-10 rounded-xl text-lg">Bắt đầu làm bài</button>
+    </div>
+  `;
+  if (examData.pdf) renderPDF(examData.pdf, 'pdfContainer');
+}
+
+async function renderPDF(dataUrl, containerId) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '<div class="pdf-container bg-gray-100 p-2 rounded-xl" id="pdfCanvas"></div>';
+  try {
+    const pdf = await pdfjsLib.getDocument(dataUrl).promise;
+    const canvasBox = document.getElementById('pdfCanvas');
+    for (let i = 1; i <= Math.min(pdf.numPages, 4); i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.1 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.className = 'mb-2';
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      canvasBox.appendChild(canvas);
+    }
+  } catch (e) { container.innerHTML = ''; }
+}
+
+function startExam() {
+  const name = document.getElementById('studentName').value.trim();
+  if (!name) return alert('Vui lòng nhập họ tên');
+  examData.studentName = name;
+  startTime = Date.now();
+  timeLeft = examData.time * 60;
+  studentAnswers = {};
+  showDoingExam();
+  startTimer();
+}
+
+function showDoingExam() {
+  app.innerHTML = `
+    <div class="bg-white rounded-xl border p-4 mb-4 sticky top-20 z-40">
+      <div class="flex justify-between items-center">
+        <span class="font-bold text-lg" id="timer">--:--</span>
+        <span class="text-sm text-gray-500" id="progress">0/${examData.questions.length}</span>
+      </div>
+      <div class="w-full bg-gray-200 rounded-full h-1.5 mt-2"><div id="bar" class="bg-blue-600 h-1.5 rounded-full" style="width:0%"></div></div>
+    </div>
+    <div id="qContainer" class="space-y-4 mb-6"></div>
+    <button onclick="submitExam()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-lg">Nộp bài</button>
+  `;
+  const c = document.getElementById('qContainer');
+  c.innerHTML = examData.questions.map((q, i) => `
+    <div class="bg-white rounded-xl border p-5">
+      <p class="font-semibold mb-3">Câu ${i+1}: ${q.text || ''}</p>
+      ${q.type === 'mcq' ? q.options.map((o, oi) => `
+        <div class="answer-option border-2 rounded-xl p-3 mb-2 cursor-pointer" onclick="selectAns(${i}, ${oi}, this)">
+          <span class="font-bold mr-2">${String.fromCharCode(65+oi)}.</span> ${o || '...'}
+        </div>
+      `).join('') : `
+        <div class="flex gap-3">
+          <div class="answer-option flex-1 border-2 rounded-xl p-4 text-center cursor-pointer font-medium" onclick="selectAns(${i}, true, this)">Đúng</div>
+          <div class="answer-option flex-1 border-2 rounded-xl p-4 text-center cursor-pointer font-medium" onclick="selectAns(${i}, false, this)">Sai</div>
+        </div>
+      `}
+    </div>
+  `).join('');
+}
+
+function selectAns(idx, val, el) {
+  studentAnswers[idx] = val;
+  el.parentElement.querySelectorAll('.answer-option').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  const answered = Object.keys(studentAnswers).length;
+  document.getElementById('progress').textContent = `${answered}/${examData.questions.length}`;
+  document.getElementById('bar').style.width = (answered / examData.questions.length * 100) + '%';
+}
+
+function startTimer() {
+  const update = () => {
+    const m = Math.floor(timeLeft / 60).toString().padStart(2,'0');
+    const s = (timeLeft % 60).toString().padStart(2,'0');
+    document.getElementById('timer').textContent = `${m}:${s}`;
+    if (timeLeft <= 0) { clearInterval(timerInterval); submitExam(); }
+    timeLeft--;
+  };
+  update();
+  timerInterval = setInterval(update, 1000);
+}
+
+async function submitExam() {
+  clearInterval(timerInterval);
+  const timeTaken = Math.round((Date.now() - startTime) / 1000);
+  const res = await fetch('/api/submit', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      examId: examData.id,
+      studentName: examData.studentName,
+      answers: studentAnswers,
+      timeTaken
+    })
+  });
+  const data = await res.json();
+  app.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-sm border p-8 text-center max-w-lg mx-auto">
+      <div class="text-6xl mb-4">${data.score / data.total >= 0.8 ? '🎉' : data.score / data.total >= 0.5 ? '👍' : '💪'}</div>
+      <h2 class="text-2xl font-bold mb-2">Kết quả</h2>
+      <p class="text-4xl font-bold text-blue-600 mb-2">${data.score}/${data.total}</p>
+      <p class="text-gray-500">Lần làm thứ ${data.attempt}</p>
+      <p class="text-sm text-gray-400 mt-4">Điểm đã được gửi cho giáo viên</p>
+    </div>
+  `;
+}
+
+async function showTeacherDashboard() {
+  app.innerHTML = `<div class="text-center py-10">Đang tải...</div>`;
+  const examsRes = await fetch('/api/exams');
+  const exams = await examsRes.json();
+  app.innerHTML = `
+    <div class="mb-6 flex justify-between items-center">
+      <h2 class="text-xl font-bold">Danh sách đề</h2>
+      <a href="/" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">+ Tạo đề mới</a>
+    </div>
+    <div id="examList" class="space-y-3"></div>
+    <div id="resultsPanel" class="mt-8 hidden"></div>
+  `;
+  const list = document.getElementById('examList');
+  if (exams.length === 0) {
+    list.innerHTML = '<p class="text-gray-500 text-center py-10">Chưa có đề nào</p>';
+    return;
+  }
+  list.innerHTML = exams.map(e => `
+    <div class="bg-white rounded-xl border p-4 flex justify-between items-center cursor-pointer hover:shadow" onclick="viewResults('${e.id}', '${e.title.replace(/'/g, "\\'")}')">
+      <div>
+        <p class="font-semibold">${e.title}</p>
+        <p class="text-sm text-gray-500">${e.questionCount} câu · ${e.time} phút</p>
+      </div>
+      <span class="text-blue-600 text-sm">Xem kết quả →</span>
+    </div>
+  `).join('');
+}
+
+async function viewResults(examId, title) {
+  const res = await fetch('/api/results/' + examId);
+  const results = await res.json();
+  const panel = document.getElementById('resultsPanel');
+  panel.classList.remove('hidden');
+  panel.innerHTML = `
+    <h3 class="text-lg font-bold mb-4">Kết quả: ${title}</h3>
+    ${results.length === 0 ? '<p class="text-gray-500">Chưa có học sinh nào nộp bài</p>' : `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm bg-white rounded-xl overflow-hidden border">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left">Họ tên</th>
+              <th class="px-4 py-3 text-center">Điểm</th>
+              <th class="px-4 py-3 text-center">Thời gian</th>
+              <th class="px-4 py-3 text-center">Lần làm</th>
+              <th class="px-4 py-3 text-left">Thời điểm</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${results.map(r => `
+              <tr class="border-t">
+                <td class="px-4 py-3 font-medium">${r.studentName}</td>
+                <td class="px-4 py-3 text-center font-bold ${r.percentage >= 80 ? 'text-green-600' : r.percentage >= 50 ? 'text-blue-600' : 'text-orange-600'}">${r.score}/${r.total}</td>
+                <td class="px-4 py-3 text-center">${Math.floor(r.timeTaken/60)}:${(r.timeTaken%60).toString().padStart(2,'0')}</td>
+                <td class="px-4 py-3 text-center">${r.attempt}</td>
+                <td class="px-4 py-3 text-gray-500">${new Date(r.submittedAt).toLocaleString('vi-VN')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `}
+  `;
+  panel.scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+</body>
+</html>
